@@ -8,7 +8,6 @@ vim.opt.expandtab = true
 vim.opt.number = true
 vim.opt.relativenumber = true
 
--- Toggle relative line numbers
 vim.keymap.set("n", "<leader>n", function()
   vim.opt.relativenumber = not vim.opt.relativenumber:get()
 end, { desc = "Toggle relative line numbers" })
@@ -17,8 +16,10 @@ end, { desc = "Toggle relative line numbers" })
 -- Bootstrap lazy.nvim
 -- =========================================================
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
-  vim.fn.system({
+local uv = vim.uv or vim.loop
+
+if not uv.fs_stat(lazypath) then
+  local out = vim.fn.system({
     "git",
     "clone",
     "--filter=blob:none",
@@ -26,22 +27,39 @@ if not vim.loop.fs_stat(lazypath) then
     "--branch=stable",
     lazypath,
   })
+  if vim.v.shell_error ~= 0 then
+    vim.api.nvim_echo({
+      { "Failed to clone lazy.nvim:\n", "ErrorMsg" },
+      { out .. "\n", "WarningMsg" },
+      { "Make sure git is installed and the instance has internet access.\n", "Normal" },
+    }, true, {})
+    return
+  end
 end
+
 vim.opt.rtp:prepend(lazypath)
 
 -- =========================================================
 -- Plugins
 -- =========================================================
 require("lazy").setup({
-
   -- =======================
   -- Tree-sitter (Python)
   -- =======================
   {
     "nvim-treesitter/nvim-treesitter",
     build = ":TSUpdate",
+    lazy = false, -- load during startup so configs module exists
     config = function()
-      require("nvim-treesitter.configs").setup({
+      local ok, configs = pcall(require, "nvim-treesitter.configs")
+      if not ok then
+        vim.api.nvim_echo({
+          { "nvim-treesitter not available yet. Run :Lazy sync and restart.\n", "WarningMsg" },
+        }, true, {})
+        return
+      end
+
+      configs.setup({
         ensure_installed = { "python" },
         auto_install = true,
         highlight = {
@@ -53,12 +71,19 @@ require("lazy").setup({
   },
 
   -- =======================
-  -- OSC52 clipboard (SSH → Mac)
+  -- OSC52 clipboard (EC2 -> Mac over SSH)
   -- =======================
   {
     "ojroques/nvim-osc52",
+    lazy = false,
     config = function()
-      local osc52 = require("osc52")
+      local ok, osc52 = pcall(require, "osc52")
+      if not ok then
+        vim.api.nvim_echo({
+          { "nvim-osc52 not available yet. Run :Lazy sync and restart.\n", "WarningMsg" },
+        }, true, {})
+        return
+      end
 
       osc52.setup({
         max_length = 0,
@@ -66,7 +91,7 @@ require("lazy").setup({
         trim = false,
       })
 
-      -- Copy yanks to macOS clipboard over SSH
+      -- When you yank normally (yy, yw, visual+y), copy to + using OSC52
       vim.api.nvim_create_autocmd("TextYankPost", {
         callback = function()
           if vim.v.event.operator == "y" and vim.v.event.regname == "" then
@@ -75,18 +100,9 @@ require("lazy").setup({
         end,
       })
 
-      -- Optional explicit mappings
+      -- Optional explicit copy mappings
       vim.keymap.set("n", "<leader>y", osc52.copy_operator, { expr = true, desc = "OSC52 copy operator" })
       vim.keymap.set("v", "<leader>y", osc52.copy_visual, { desc = "OSC52 copy visual" })
     end,
   },
-
 })
-
--- =========================================================
--- Clipboard behavior
--- =========================================================
--- NOTE:
--- Copy (yy / y) → goes to your Mac clipboard via OSC52
--- Paste (Cmd+V) → handled by your terminal
--- "+p is NOT used for pasting from Mac (security restriction)
